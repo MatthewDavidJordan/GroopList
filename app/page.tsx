@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight } from "lucide-react"
+import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight, RefreshCcw } from "lucide-react"
 import { db, auth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from "@/lib/firebase"
 import { signOut } from "firebase/auth"
 import InstallPrompt from "@/components/InstallPrompt"
@@ -22,6 +22,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -106,6 +107,10 @@ export default function GroceryApp() {
   const [completedListExpanded, setCompletedListExpanded] = useState(false)
   const [members, setMembers] = useState<User[]>([])
   const [memberLocations, setMemberLocations] = useState<Record<string, LocationData>>({})
+  const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [pullStartY, setPullStartY] = useState<number | null>(null)
+  const [pullDistance, setPullDistance] = useState(0)
 
   // Utility: convert timestamps to a friendly "last seen" label
   const formatLastSeen = (ts?: number) => {
@@ -140,6 +145,52 @@ export default function GroceryApp() {
     const provider = new GoogleAuthProvider()
     await signInWithPopup(auth, provider)
   }
+
+  // Manual refetch of items (useful if user wants to force sync)
+  const refetchGroceryList = async () => {
+    if (!household?.id) return
+    try {
+      setRefreshing(true)
+      const itemsRef = collection(db, "households", household.id, "items")
+      const q = query(itemsRef, orderBy("addedAt", "asc"))
+      const snap = await getDocs(q)
+      const items: GroceryItem[] = snap.docs.map((d) => {
+        const data = d.data() as any
+        return {
+          id: d.id,
+          name: data.name || "",
+          addedBy: data.addedByName || data.addedBy || "",
+          addedAt: (data.addedAt?.toDate?.() || new Date()).toISOString(),
+          completed: !!data.completed,
+          completedBy: data.completedByName,
+          completedAt: data.completedAt ? (data.completedAt.toDate?.() || new Date()).toISOString() : undefined,
+        }
+      })
+      setGroceryList(items)
+    } catch (e) {
+      console.warn("Manual refresh failed", e)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  // Ensure the current signed-in user is enrolled as a household member (for security rules)
+  useEffect(() => {
+    const enroll = async () => {
+      try {
+        if (!uid || !household?.id || !userName.trim()) return
+        await setDoc(doc(db, "households", household.id, "members", uid), {
+          uid,
+          name: userName,
+          role: "member",
+          joinedAt: serverTimestamp(),
+        }, { merge: true })
+      } catch (e) {
+        // ignore; will surface on actual write attempts
+      }
+    }
+    enroll()
+  }, [db, uid, household?.id, userName])
 
   const requestNotificationPermission = async () => {
     if (!("Notification" in window)) {
@@ -381,36 +432,61 @@ export default function GroceryApp() {
   }
 
   const addGroceryItem = async () => {
+    setErrorBanner(null)
     if (!newItemName.trim() || !currentUser || !household?.id) return
-    const itemsRef = collection(db, "households", household.id, "items")
-    await addDoc(itemsRef, {
-      name: newItemName.trim(),
-      addedById: uid || null,
-      addedByName: currentUser.name,
-      addedAt: serverTimestamp(),
-      completed: false,
-    })
-    setNewItemName("")
+    try {
+      // Ensure membership (in case of race conditions)
+      if (uid) {
+        await setDoc(doc(db, "households", household.id, "members", uid), {
+          uid,
+          name: currentUser.name || userName,
+          role: "member",
+          joinedAt: serverTimestamp(),
+        }, { merge: true })
+      }
+      const itemsRef = collection(db, "households", household.id, "items")
+      await addDoc(itemsRef, {
+        name: newItemName.trim(),
+        addedById: uid || null,
+        addedByName: currentUser.name,
+        addedAt: serverTimestamp(),
+        completed: false,
+      })
+      setNewItemName("")
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      setErrorBanner(`Failed to add item: ${msg}`)
+    }
   }
 
   const toggleItemCompletion = async (itemId: string) => {
+    setErrorBanner(null)
     if (!currentUser || !household?.id) return
-    const itemRef = doc(db, "households", household.id, "items", itemId)
-    const existing = groceryList.find((i) => i.id === itemId)
-    if (!existing) return
-    const willComplete = !existing.completed
-    await updateDoc(itemRef, {
-      completed: willComplete,
-      completedById: willComplete ? uid || null : null,
-      completedByName: willComplete ? currentUser.name : null,
-      completedAt: willComplete ? serverTimestamp() : null,
-    })
+    try {
+      const itemRef = doc(db, "households", household.id, "items", itemId)
+      const existing = groceryList.find((i) => i.id === itemId)
+      if (!existing) return
+      const willComplete = !existing.completed
+      await updateDoc(itemRef, {
+        completed: willComplete,
+        completedById: willComplete ? uid || null : null,
+        completedByName: willComplete ? currentUser.name : null,
+        completedAt: willComplete ? serverTimestamp() : null,
+      })
+    } catch (e: any) {
+      setErrorBanner(`Failed to update item: ${e?.message || String(e)}`)
+    }
   }
 
   const deleteGroceryItem = async (itemId: string) => {
+    setErrorBanner(null)
     if (!household?.id) return
-    const itemRef = doc(db, "households", household.id, "items", itemId)
-    await deleteDoc(itemRef)
+    try {
+      const itemRef = doc(db, "households", household.id, "items", itemId)
+      await deleteDoc(itemRef)
+    } catch (e: any) {
+      setErrorBanner(`Failed to delete item: ${e?.message || String(e)}`)
+    }
   }
 
   const createUser = (name: string, householdId: string) => {
@@ -644,6 +720,16 @@ export default function GroceryApp() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={refetchGroceryList}
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent flex items-center gap-2"
+                title="Refresh list"
+              >
+                <RefreshCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">Refresh</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={async () => {
                   await signOut(auth)
                   localStorage.removeItem("groceryApp_user")
@@ -668,10 +754,49 @@ export default function GroceryApp() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-4 space-y-6">
+      <main
+        className="max-w-4xl mx-auto p-4 space-y-6"
+        onTouchStart={(e) => {
+          if (typeof window !== 'undefined' && window.scrollY === 0) {
+            setPullStartY(e.touches[0].clientY)
+            setPullDistance(0)
+          } else {
+            setPullStartY(null)
+          }
+        }}
+        onTouchMove={(e) => {
+          if (pullStartY !== null) {
+            const dist = Math.max(0, e.touches[0].clientY - pullStartY)
+            setPullDistance(dist)
+          }
+        }}
+        onTouchEnd={async () => {
+          if (pullStartY !== null && pullDistance > 60) {
+            await refetchGroceryList()
+          }
+          setPullStartY(null)
+          setPullDistance(0)
+        }}
+        style={{
+          // Visual feedback for pull distance (subtle translate)
+          transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 60)}px)` : undefined,
+          transition: pullStartY === null ? 'transform 150ms ease-out' : undefined,
+        }}
+      >
         <InstallPrompt />
         {uid && household?.id && (
           <PushSetup householdId={household.id} uid={uid} />
+        )}
+        {(refreshing || pullDistance > 0) && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground justify-center">
+            <RefreshCcw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>{refreshing ? 'Refreshing…' : 'Pull to refresh'}</span>
+          </div>
+        )}
+        {errorBanner && (
+          <Alert className="border-red-300 bg-red-50 dark:bg-red-950">
+            <AlertDescription className="text-red-700 dark:text-red-300">{errorBanner}</AlertDescription>
+          </Alert>
         )}
         {unreadNotifications > 0 && (
           <div className="space-y-2">
