@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight, RefreshCcw } from "lucide-react"
+import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight, RefreshCcw, List } from "lucide-react"
 import { db, auth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from "@/lib/firebase"
 import Link from "next/link"
 import { signOut } from "firebase/auth"
@@ -112,6 +112,7 @@ export default function GroceryApp() {
   const [refreshing, setRefreshing] = useState(false)
   const [pullStartY, setPullStartY] = useState<number | null>(null)
   const [pullDistance, setPullDistance] = useState(0)
+  const newItemInputRef = useRef<HTMLInputElement | null>(null)
 
   // Utility: convert timestamps to a friendly "last seen" label
   const formatLastSeen = (ts?: number) => {
@@ -740,23 +741,26 @@ export default function GroceryApp() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950 dark:to-teal-950">
       <header className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border-b border-emerald-200 dark:border-emerald-800 sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto px-4 py-4">
+        <div className="max-w-4xl mx-auto px-3 py-3 md:px-4 md:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart className="h-6 w-6 text-emerald-600" />
-              <h1 className="text-xl font-bold text-emerald-900 dark:text-emerald-100">GroopList</h1>
+              <h1 className="text-lg md:text-xl font-bold text-emerald-900 dark:text-emerald-100">GroopList</h1>
             </div>
             <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">{currentUser.name}</p>
-                <p className="text-xs text-emerald-600 dark:text-emerald-400">{household.name}</p>
+              <div className="hidden md:block text-right">
+                <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100 truncate max-w-[12rem]">{currentUser.name}</p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 truncate max-w-[12rem]">{household.name}</p>
               </div>
-              <Link href="/lists" className="text-sm text-emerald-700 hover:underline">Your Lists</Link>
+              {/* Compact actions on mobile */}
+              <Link href="/lists" className="md:hidden inline-flex items-center justify-center rounded-md p-2 text-emerald-700 hover:bg-emerald-50" aria-label="Your Lists">
+                <List className="h-5 w-5" />
+              </Link>
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
                 onClick={refetchGroceryList}
-                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent flex items-center gap-2"
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent h-9 w-9 md:w-auto md:px-3 md:py-1.5 flex items-center gap-2"
                 title="Refresh list"
               >
                 <RefreshCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -772,7 +776,7 @@ export default function GroceryApp() {
                   setCurrentUser(null)
                   setHousehold(null)
                 }}
-                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent"
+                className="hidden md:inline-flex border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent"
               >
                 Sign out
               </Button>
@@ -780,7 +784,7 @@ export default function GroceryApp() {
                 variant="outline"
                 size="sm"
                 onClick={leaveHousehold}
-                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent"
+                className="hidden md:inline-flex border-emerald-300 text-emerald-700 hover:bg-emerald-50 bg-transparent"
               >
                 Leave
               </Button>
@@ -790,7 +794,7 @@ export default function GroceryApp() {
       </header>
 
       <main
-        className="max-w-4xl mx-auto p-4 space-y-6"
+        className="max-w-4xl mx-auto p-4 space-y-6 pb-24 md:pb-6"
         onTouchStart={(e) => {
           if (typeof window !== 'undefined' && window.scrollY === 0) {
             setPullStartY(e.touches[0].clientY)
@@ -995,6 +999,7 @@ export default function GroceryApp() {
                 onChange={(e) => setNewItemName(e.target.value)}
                 onKeyPress={(e) => e.key === "Enter" && addGroceryItem()}
                 className="flex-1"
+                ref={newItemInputRef}
               />
               <Button
                 onClick={addGroceryItem}
@@ -1116,6 +1121,41 @@ export default function GroceryApp() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Mobile bottom navigation */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 border-t border-emerald-200 dark:border-emerald-800 bg-white/90 dark:bg-gray-900/90 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+        <div className="max-w-4xl mx-auto">
+          <div className="grid grid-cols-4">
+            <Link href="/lists" className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50">
+              <List className="h-5 w-5" />
+              <span>Your Lists</span>
+            </Link>
+            <button
+              onClick={refetchGroceryList}
+              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
+            >
+              <RefreshCcw className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => newItemInputRef.current?.focus()}
+              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
+            >
+              <Plus className="h-5 w-5" />
+              <span>Add Item</span>
+            </button>
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+              }}
+              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
+            >
+              <Bell className="h-5 w-5" />
+              <span>Alerts</span>
+            </button>
+          </div>
+        </div>
+      </nav>
     </div>
   )
 }
