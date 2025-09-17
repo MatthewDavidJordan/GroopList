@@ -561,7 +561,7 @@ export default function GroceryApp() {
     if (!userName.trim() || !householdName.trim()) return
 
     const newHousehold: Household = {
-      id: Math.random().toString(36).substr(2, 6).toUpperCase(),
+      id: (Math.floor(100000 + Math.random() * 900000)).toString(),
       name: householdName,
       members: [],
       createdAt: new Date().toISOString(),
@@ -598,15 +598,35 @@ export default function GroceryApp() {
   }
 
   const joinHousehold = async () => {
+    setErrorBanner(null)
     if (!userName.trim() || !householdCode.trim()) return
-    const code = householdCode.trim().toUpperCase()
+    if (!uid) { setErrorBanner("Please wait, still signing you in..."); return }
+    // Normalize to 6-digit numeric code
+    const code = householdCode.replace(/\D/g, "").slice(0, 6)
+    if (code.length !== 6) {
+      setErrorBanner("Please enter a valid 6-digit code.")
+      return
+    }
     const hhRef = doc(db, "households", code)
+    const memberRef = doc(db, "households", code, "members", uid)
     try {
+      // 1) Create/merge membership FIRST so rules will allow us to read household doc
+      await setDoc(memberRef, {
+        uid,
+        name: userName,
+        role: "member",
+        joinedAt: serverTimestamp(),
+      }, { merge: true })
+
+      // 2) Now read household to verify it exists
       const hhSnap = await getDoc(hhRef)
       if (!hhSnap.exists()) {
+        // Rollback the membership we just wrote
+        try { await deleteDoc(memberRef) } catch {}
         setErrorBanner("Household not found. Please check the code.")
         return
       }
+
       const hhData = hhSnap.data() as any
       const targetHousehold: Household = {
         id: code,
@@ -619,20 +639,13 @@ export default function GroceryApp() {
       setHousehold(targetHousehold)
       localStorage.setItem("groceryApp_household", JSON.stringify(targetHousehold))
 
-      if (uid) {
-        await setDoc(doc(db, "households", code, "members", uid), {
-          uid,
-          name: userName,
-          role: "member",
-          joinedAt: serverTimestamp(),
-        }, { merge: true })
-        await setDoc(doc(db, "users", uid, "households", code), {
-          householdId: code,
-          name: hhData.name || "",
-          role: "member",
-          joinedAt: serverTimestamp(),
-        }, { merge: true })
-      }
+      // 3) Mirror under users tree for Your Lists
+      await setDoc(doc(db, "users", uid, "households", code), {
+        householdId: code,
+        name: hhData.name || "",
+        role: "member",
+        joinedAt: serverTimestamp(),
+      }, { merge: true })
     } catch (e: any) {
       setErrorBanner(e?.message || "Failed to join household")
     }
@@ -760,15 +773,17 @@ export default function GroceryApp() {
                     <Label htmlFor="householdCode">Household Code</Label>
                     <Input
                       id="householdCode"
-                      placeholder="Enter household code"
+                      placeholder="Enter 6-digit code"
+                      inputMode="numeric"
+                      pattern="\\d{6}"
                       value={householdCode}
-                      onChange={(e) => setHouseholdCode(e.target.value)}
+                      onChange={(e) => setHouseholdCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
                     />
                   </div>
                   <Button
                     onClick={joinHousehold}
                     className="w-full bg-emerald-600 hover:bg-emerald-700"
-                    disabled={!userName.trim() || !householdCode.trim()}
+                    disabled={!userName.trim() || !uid || householdCode.replace(/[^0-9]/g, '').length !== 6}
                   >
                     Join Household
                   </Button>
