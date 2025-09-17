@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight, RefreshCcw } from "lucide-react"
 import { db, auth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from "@/lib/firebase"
+import Link from "next/link"
 import { signOut } from "firebase/auth"
 import InstallPrompt from "@/components/InstallPrompt"
 import PushSetup from "@/components/PushSetup"
@@ -366,7 +367,7 @@ export default function GroceryApp() {
     if (!household?.id) return
     const itemsRef = collection(db, "households", household.id, "items")
     const q = query(itemsRef, orderBy("addedAt", "asc"))
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
       const items: GroceryItem[] = snap.docs.map((d) => {
         const data = d.data() as any
         return {
@@ -444,15 +445,27 @@ export default function GroceryApp() {
           joinedAt: serverTimestamp(),
         }, { merge: true })
       }
+      // Optimistic insert for instant UI feedback
+      const optimisticItem: GroceryItem = {
+        id: `temp-${Math.random().toString(36).slice(2)}`,
+        name: newItemName.trim(),
+        addedBy: currentUser.name,
+        addedAt: new Date().toISOString(),
+        completed: false,
+      }
+      setGroceryList((prev) => [...prev, optimisticItem])
+
       const itemsRef = collection(db, "households", household.id, "items")
       await addDoc(itemsRef, {
         name: newItemName.trim(),
         addedById: uid || null,
         addedByName: currentUser.name,
         addedAt: serverTimestamp(),
+        addedAtClient: Date.now(),
         completed: false,
       })
       setNewItemName("")
+      // Snapshot will replace the optimistic state when the server confirms
     } catch (e: any) {
       const msg = e?.message || String(e)
       setErrorBanner(`Failed to add item: ${msg}`)
@@ -504,7 +517,7 @@ export default function GroceryApp() {
     if (!userName.trim() || !householdName.trim()) return
 
     const newHousehold: Household = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).substr(2, 6).toUpperCase(),
       name: householdName,
       members: [],
       createdAt: new Date().toISOString(),
@@ -530,12 +543,20 @@ export default function GroceryApp() {
         role: "owner",
         joinedAt: serverTimestamp(),
       })
+      // Mirror under user for listing
+      await setDoc(doc(db, "users", uid, "households", newHousehold.id), {
+        householdId: newHousehold.id,
+        name: newHousehold.name,
+        role: "owner",
+        joinedAt: serverTimestamp(),
+      })
     }
   }
 
   const joinHousehold = async () => {
     if (!userName.trim() || !householdCode.trim()) return
-    const hhRef = doc(db, "households", householdCode)
+    const code = householdCode.trim().toUpperCase()
+    const hhRef = doc(db, "households", code)
     const hhSnap = await getDoc(hhRef)
     if (!hhSnap.exists()) {
       alert("Household not found. Please check the code.")
@@ -543,7 +564,7 @@ export default function GroceryApp() {
     }
     const hhData = hhSnap.data() as any
     const targetHousehold: Household = {
-      id: householdCode,
+      id: code,
       name: hhData.name || "",
       members: [],
       createdAt: new Date().toISOString(),
@@ -554,16 +575,26 @@ export default function GroceryApp() {
     localStorage.setItem("groceryApp_household", JSON.stringify(targetHousehold))
 
     if (uid) {
-      await setDoc(doc(db, "households", householdCode, "members", uid), {
+      await setDoc(doc(db, "households", code, "members", uid), {
         uid,
         name: userName,
+        role: "member",
+        joinedAt: serverTimestamp(),
+      }, { merge: true })
+      await setDoc(doc(db, "users", uid, "households", code), {
+        householdId: code,
+        name: hhData.name || "",
         role: "member",
         joinedAt: serverTimestamp(),
       }, { merge: true })
     }
   }
 
-  const leaveHousehold = () => {
+  const leaveHousehold = async () => {
+    if (household?.id && uid) {
+      try { await deleteDoc(doc(db, "households", household.id, "members", uid)) } catch {}
+      try { await deleteDoc(doc(db, "users", uid, "households", household.id)) } catch {}
+    }
     localStorage.removeItem("groceryApp_user")
     localStorage.removeItem("groceryApp_household")
     setCurrentUser(null)
@@ -622,6 +653,9 @@ export default function GroceryApp() {
             <p className="text-emerald-700 dark:text-emerald-300 text-balance">
               Smart grocery coordination for groups
             </p>
+            <div className="mt-2">
+              <Link href="/lists" className="text-sm text-emerald-700 hover:underline">Your Lists</Link>
+            </div>
           </div>
 
           <Card className="border-emerald-200 dark:border-emerald-800">
@@ -717,6 +751,7 @@ export default function GroceryApp() {
                 <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">{currentUser.name}</p>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">{household.name}</p>
               </div>
+              <Link href="/lists" className="text-sm text-emerald-700 hover:underline">Your Lists</Link>
               <Button
                 variant="outline"
                 size="sm"
