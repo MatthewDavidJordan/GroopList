@@ -601,36 +601,40 @@ export default function GroceryApp() {
     if (!userName.trim() || !householdCode.trim()) return
     const code = householdCode.trim().toUpperCase()
     const hhRef = doc(db, "households", code)
-    const hhSnap = await getDoc(hhRef)
-    if (!hhSnap.exists()) {
-      alert("Household not found. Please check the code.")
-      return
-    }
-    const hhData = hhSnap.data() as any
-    const targetHousehold: Household = {
-      id: code,
-      name: hhData.name || "",
-      members: [],
-      createdAt: new Date().toISOString(),
-    }
-    const user = createUser(userName, householdCode)
-    targetHousehold.members.push(user)
-    setHousehold(targetHousehold)
-    localStorage.setItem("groceryApp_household", JSON.stringify(targetHousehold))
-
-    if (uid) {
-      await setDoc(doc(db, "households", code, "members", uid), {
-        uid,
-        name: userName,
-        role: "member",
-        joinedAt: serverTimestamp(),
-      }, { merge: true })
-      await setDoc(doc(db, "users", uid, "households", code), {
-        householdId: code,
+    try {
+      const hhSnap = await getDoc(hhRef)
+      if (!hhSnap.exists()) {
+        setErrorBanner("Household not found. Please check the code.")
+        return
+      }
+      const hhData = hhSnap.data() as any
+      const targetHousehold: Household = {
+        id: code,
         name: hhData.name || "",
-        role: "member",
-        joinedAt: serverTimestamp(),
-      }, { merge: true })
+        members: [],
+        createdAt: new Date().toISOString(),
+      }
+      const user = createUser(userName, code)
+      targetHousehold.members.push(user)
+      setHousehold(targetHousehold)
+      localStorage.setItem("groceryApp_household", JSON.stringify(targetHousehold))
+
+      if (uid) {
+        await setDoc(doc(db, "households", code, "members", uid), {
+          uid,
+          name: userName,
+          role: "member",
+          joinedAt: serverTimestamp(),
+        }, { merge: true })
+        await setDoc(doc(db, "users", uid, "households", code), {
+          householdId: code,
+          name: hhData.name || "",
+          role: "member",
+          joinedAt: serverTimestamp(),
+        }, { merge: true })
+      }
+    } catch (e: any) {
+      setErrorBanner(e?.message || "Failed to join household")
     }
   }
 
