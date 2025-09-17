@@ -794,7 +794,7 @@ export default function GroceryApp() {
       </header>
 
       <main
-        className="max-w-4xl mx-auto p-4 space-y-6 pb-24 md:pb-6"
+        className="max-w-4xl mx-auto p-4 space-y-6 pb-28 md:pb-6"
         onTouchStart={(e) => {
           if (typeof window !== 'undefined' && window.scrollY === 0) {
             setPullStartY(e.touches[0].clientY)
@@ -820,6 +820,8 @@ export default function GroceryApp() {
           // Visual feedback for pull distance (subtle translate)
           transform: pullDistance > 0 ? `translateY(${Math.min(pullDistance, 60)}px)` : undefined,
           transition: pullStartY === null ? 'transform 150ms ease-out' : undefined,
+          // Safe-area space for iOS home indicator
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)'
         }}
       >
         <InstallPrompt />
@@ -1123,32 +1125,28 @@ export default function GroceryApp() {
       </main>
 
       {/* Mobile bottom navigation */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-50 border-t border-emerald-200 dark:border-emerald-800 bg-white/90 dark:bg-gray-900/90 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-50 border-t border-emerald-200 dark:border-emerald-800 bg-white/90 dark:bg-gray-900/90 backdrop-blur supports-[backdrop-filter]:bg-white/60"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
+      >
         <div className="max-w-4xl mx-auto">
-          <div className="grid grid-cols-4">
-            <Link href="/lists" className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50">
+          <div className="grid grid-cols-3">
+            <Link href="/lists" className="flex flex-col items-center py-3 text-xs text-emerald-700 hover:bg-emerald-50">
               <List className="h-5 w-5" />
               <span>Your Lists</span>
             </Link>
             <button
               onClick={refetchGroceryList}
-              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
+              className="flex flex-col items-center py-3 text-xs text-emerald-700 hover:bg-emerald-50"
             >
               <RefreshCcw className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />
               <span>Refresh</span>
             </button>
             <button
-              onClick={() => newItemInputRef.current?.focus()}
-              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
-            >
-              <Plus className="h-5 w-5" />
-              <span>Add Item</span>
-            </button>
-            <button
               onClick={() => {
                 if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
               }}
-              className="flex flex-col items-center py-2 text-xs text-emerald-700 hover:bg-emerald-50"
+              className="flex flex-col items-center py-3 text-xs text-emerald-700 hover:bg-emerald-50"
             >
               <Bell className="h-5 w-5" />
               <span>Alerts</span>
