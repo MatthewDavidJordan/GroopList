@@ -14,6 +14,7 @@ interface UserHousehold {
   name: string
   role: "owner" | "member"
   joinedAt?: any
+  unreadCount?: number
 }
 
 export default function YourListsPage() {
@@ -40,6 +41,7 @@ export default function YourListsPage() {
         name: (d.data() as any).name,
         role: (d.data() as any).role,
         joinedAt: (d.data() as any).joinedAt,
+        unreadCount: (d.data() as any).unreadCount || 0,
       }))
       setItems(list)
       setLoading(false)
@@ -129,6 +131,12 @@ export default function YourListsPage() {
                       <Badge variant="secondary">{h.householdId}</Badge>
                       <span>•</span>
                       <span className="capitalize">{h.role}</span>
+                      {h.unreadCount && h.unreadCount > 0 && (
+                        <>
+                          <span>•</span>
+                          <Badge className="bg-emerald-600">{h.unreadCount} unread</Badge>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

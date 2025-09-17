@@ -10,6 +10,17 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Users, ShoppingCart, MapPin, Plus, Trash2, Navigation, Bell, X, ChevronDown, ChevronRight, RefreshCcw, List } from "lucide-react"
 import { db, auth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from "@/lib/firebase"
 import Link from "next/link"
@@ -30,6 +41,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  increment,
 } from "firebase/firestore"
 
 interface User {
@@ -214,8 +226,9 @@ export default function GroceryApp() {
 
   const createNotification = async (notification: Omit<Notification, "id" | "timestamp" | "read">) => {
     if (!household?.id) return
-    // Persist to Firestore
-    await addDoc(collection(db, "households", household.id, "notifications"), {
+    // Create a notification ID so we can mirror the same ID under per-user paths
+    const notifRef = doc(collection(db, "households", household.id, "notifications"))
+    const notifPayload = {
       type: notification.type,
       title: notification.title,
       message: notification.message,
@@ -223,7 +236,30 @@ export default function GroceryApp() {
       storeName: notification.storeName || null,
       timestamp: serverTimestamp(),
       readBy: [],
-    })
+    }
+    // Persist to household notifications
+    await setDoc(notifRef, notifPayload)
+
+    // Mirror per-user notification docs + bump unreadCount for each member (except actor if provided)
+    try {
+      const mref = collection(db, "households", household.id, "members")
+      const membersSnap = await getDocs(mref)
+      membersSnap.forEach(async (d) => {
+        const memberId = d.id
+        if (notification.userId && memberId === notification.userId) return
+        // per-user notification doc
+        await setDoc(doc(db, "users", memberId, "households", household.id, "notifications", notifRef.id), {
+          ...notifPayload,
+          read: false,
+        })
+        // unread counter on user/household doc
+        await setDoc(doc(db, "users", memberId, "households", household.id), {
+          unreadCount: increment(1),
+        }, { merge: true })
+      })
+    } catch (e) {
+      console.warn("Per-user notification mirror failed", e)
+    }
 
     // Optionally mirror to UI immediately (onSnapshot will also update)
     if (notificationsEnabled && typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
@@ -239,6 +275,13 @@ export default function GroceryApp() {
     if (!household?.id || !uid) return
     const nref = doc(db, "households", household.id, "notifications", notificationId)
     await updateDoc(nref, { readBy: arrayUnion(uid) })
+    // Mark per-user doc read and decrement user's unreadCount
+    try {
+      await updateDoc(doc(db, "users", uid, "households", household.id, "notifications", notificationId), { read: true })
+      await setDoc(doc(db, "users", uid, "households", household.id), { unreadCount: increment(-1) }, { merge: true })
+    } catch (e) {
+      // ignore if per-user doc doesn't exist
+    }
   }
 
   const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -1130,7 +1173,7 @@ export default function GroceryApp() {
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
       >
         <div className="max-w-4xl mx-auto">
-          <div className="grid grid-cols-3">
+          <div className="grid grid-cols-4">
             <Link href="/lists" className="flex flex-col items-center py-3 text-xs text-emerald-700 hover:bg-emerald-50">
               <List className="h-5 w-5" />
               <span>Your Lists</span>
@@ -1151,6 +1194,37 @@ export default function GroceryApp() {
               <Bell className="h-5 w-5" />
               <span>Alerts</span>
             </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button className="flex flex-col items-center py-3 text-xs text-emerald-700 hover:bg-emerald-50">
+                  <Users className="h-5 w-5" />
+                  <span>Profile</span>
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Profile</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Signed in as <span className="font-medium text-foreground">{currentUser.name}</span>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Close</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={async () => {
+                      await signOut(auth)
+                      localStorage.removeItem("groceryApp_user")
+                      localStorage.removeItem("groceryApp_household")
+                      setCurrentUser(null)
+                      setHousehold(null)
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    Sign out
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </nav>
